@@ -23,11 +23,15 @@ class ImageClassifier(pl.LightningModule):
         
         self.train_acc = torchmetrics.Accuracy(
             task='binary' if num_classes == 2 else 'multiclass',
-            num_classes=num_classes
+            num_classes=num_classes,
+            top_k=1,
+            threshold=0.5
         )
         self.val_acc = torchmetrics.Accuracy(
             task='binary' if num_classes == 2 else 'multiclass',
-            num_classes=num_classes
+            num_classes=num_classes,
+            top_k=1,
+            threshold=0.5
         )
         
         self.criterion = nn.CrossEntropyLoss()
@@ -39,7 +43,8 @@ class ImageClassifier(pl.LightningModule):
         x, y = batch
         logits = self(x)
         loss = self.criterion(logits, y)
-        self.train_acc(logits.softmax(dim=-1), y)
+        preds = torch.argmax(logits, dim=1)
+        self.train_acc(preds, y)
         
         self.log('train_loss', loss, prog_bar=True)
         self.log('train_acc', self.train_acc, prog_bar=True)
@@ -49,7 +54,8 @@ class ImageClassifier(pl.LightningModule):
         x, y = batch
         logits = self(x)
         loss = self.criterion(logits, y)
-        self.val_acc(logits.softmax(dim=-1), y)
+        preds = torch.argmax(logits, dim=1)
+        self.val_acc(preds, y)
         
         self.log('val_loss', loss, prog_bar=True)
         self.log('val_acc', self.val_acc, prog_bar=True)

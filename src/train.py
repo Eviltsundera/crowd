@@ -4,7 +4,7 @@ from omegaconf import DictConfig
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 
-@hydra.main(config_path="../configs", config_name="config")
+@hydra.main(version_base=None, config_path="../configs", config_name="config")
 def train(cfg: DictConfig):
     pl.seed_everything(cfg.seed)
     

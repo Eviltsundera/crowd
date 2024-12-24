@@ -1,4 +1,4 @@
-_target_: src.datamodule.ImageDataModule
-data_dir: "path/to/your/data"
+_target_: src.datamodule.TreeDataModule
+data_dir: "data/split"
 batch_size: 32
 num_workers: 4 
