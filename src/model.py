@@ -1,22 +1,34 @@
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import torchvision.models as models
 import torchmetrics
+import timm
 
 class ImageClassifier(pl.LightningModule):
-    def __init__(self, model_name: str, num_classes: int, learning_rate: float):
+    def __init__(
+        self, 
+        backbone: str, 
+        num_classes: int, 
+        learning_rate: float,
+        pretrained: bool = True
+    ):
         super().__init__()
         self.save_hyperparameters()
         
-        # Загружаем предобученную модель
-        self.model = getattr(models, model_name)(pretrained=True)
-        in_features = self.model.fc.in_features
-        self.model.fc = nn.Linear(in_features, num_classes)
+        self.model = timm.create_model(
+            backbone,
+            pretrained=pretrained,
+            num_classes=num_classes
+        )
         
-        # Метрики
-        self.train_acc = torchmetrics.Accuracy(task='binary' if num_classes == 2 else 'multiclass', num_classes=num_classes)
-        self.val_acc = torchmetrics.Accuracy(task='binary' if num_classes == 2 else 'multiclass', num_classes=num_classes)
+        self.train_acc = torchmetrics.Accuracy(
+            task='binary' if num_classes == 2 else 'multiclass',
+            num_classes=num_classes
+        )
+        self.val_acc = torchmetrics.Accuracy(
+            task='binary' if num_classes == 2 else 'multiclass',
+            num_classes=num_classes
+        )
         
         self.criterion = nn.CrossEntropyLoss()
         
