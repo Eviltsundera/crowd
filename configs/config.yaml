@@ -1,11 +1,13 @@
 defaults:
-  - model: resnet18
+  - model: efficientnet
   - datamodule: default
   - trainer: default
   - _self_
 
 seed: 42
 project_name: "image_classifier"
+checkpoint_dir: "checkpoints"
+# save_last_k: 20
 
 hydra:
   run:

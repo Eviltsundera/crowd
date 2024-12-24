@@ -27,8 +27,9 @@ python ./scripts/split_train_val.py data/hw_3_markup_data.txt data/downloads/ da
 ## Репа должна выглядеть примерно так:
 
 ```
-tree -d
+$ tree -d
 .
+├── checkpoints
 ├── configs
 │   ├── datamodule
 │   ├── model
@@ -44,8 +45,10 @@ tree -d
 │           ├── conifer
 │           └── deciduous
 ├── notebooks
+├── outputs
 ├── scripts
-└── src
-
-17 directories
+├── src
+│   └── __pycache__
+├── tree_classifier.egg-info
+└── wandb
 ```

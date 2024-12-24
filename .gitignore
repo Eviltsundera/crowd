@@ -45,3 +45,5 @@ ENV/
 *.ckpt
 data/
 downloads/
+
+checkpoints/
