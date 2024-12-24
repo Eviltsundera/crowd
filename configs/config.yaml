@@ -1,0 +1,15 @@
+defaults:
+  - model: resnet18
+  - datamodule: default
+  - trainer: default
+  - _self_
+
+seed: 42
+project_name: "image_classifier"
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num} 

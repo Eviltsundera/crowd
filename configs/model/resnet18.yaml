@@ -1,0 +1,4 @@
+_target_: src.model.ImageClassifier
+model_name: "resnet18"
+num_classes: 2
+learning_rate: 0.001 
