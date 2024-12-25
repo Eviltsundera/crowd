@@ -25,10 +25,10 @@ def train(cfg: DictConfig):
         callbacks=[
             pl.callbacks.ModelCheckpoint(
                 dirpath=run_checkpoint_dir,
-                monitor="val_loss",
-                mode="min",
+                monitor="val_acc",
+                mode="max",
                 save_top_k=1,
-                filename="best-{epoch:02d}-{val_loss:.2f}",
+                filename="best-{epoch:02d}-{val_acc:.2f}",
                 save_on_train_epoch_end=False,
             ),
             pl.callbacks.ModelCheckpoint(
