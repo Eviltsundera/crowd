@@ -9,6 +9,32 @@ import yaml
 from pathlib import Path
 import torchvision.transforms as transforms
 import argparse
+import pandas as pd
+from PIL import Image
+import requests
+from io import BytesIO
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from tqdm import tqdm
+
+class UrlImageDataset(Dataset):
+    def __init__(self, urls):
+        self.urls = urls
+        self.transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    
+    def __len__(self):
+        return len(self.urls)
+    
+    def __getitem__(self, idx):
+        url = self.urls[idx]
+        response = requests.get(url)
+        img = Image.open(BytesIO(response.content)).convert('RGB')
+        return self.transform(img)
 
 def load_config(config_path: str):
     with open(config_path, 'r') as f:
@@ -26,6 +52,34 @@ def get_backbone_from_checkpoint(checkpoint_path: str):
             return load_config('configs/model/resnet18.yaml')
     except:
         return load_config('configs/model/resnet18.yaml')
+
+def setup_device(args):
+    if 'cuda' in args.device and not torch.cuda.is_available():
+        print(f"Warning: CUDA requested but not available. Falling back to CPU.")
+        args.device = 'cpu'
+    device = torch.device(args.device)
+    print(f"Using device: {device}")
+    return device
+
+def load_models(checkpoint_dir, device):
+    models = []
+    for checkpoint_file in os.listdir(checkpoint_dir):
+        if checkpoint_file.endswith('.ckpt'):
+            checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
+            model_config = get_backbone_from_checkpoint(checkpoint_path)
+            
+            model = ImageClassifier.load_from_checkpoint(
+                checkpoint_path,
+                backbone=model_config['backbone'],
+                num_classes=model_config['num_classes'],
+                learning_rate=model_config['learning_rate']
+            )
+            model.to(device)
+            if 'cuda' in str(device):
+                model.cuda()
+            models.append(model)
+            print(f"Loaded model from {checkpoint_file} with backbone {model_config['backbone']}")
+    return models
 
 def ensemble_predict(models, batch, device, use_tta=False):
     predictions = []
@@ -51,64 +105,97 @@ def ensemble_predict(models, batch, device, use_tta=False):
         
         predictions.append(model_pred)
     
-    # Усредняем предсказания всех моделей
     return torch.stack(predictions).mean(dim=0)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--use_tta', action='store_true', help='Использовать Test Time Augmentation')
-    args = parser.parse_args()
-
-    config = load_config('configs/config.yaml')
-    data_config = load_config('configs/datamodule/default.yaml')
-
-    datamodule = TreeDataModule(
-        data_dir=data_config['data_dir'],
-        batch_size=data_config['batch_size'],
-        num_workers=data_config['num_workers']
-    )
-    datamodule.setup()
-
-    models = []
-    checkpoint_dir = 'ensemble'
-    for checkpoint_file in os.listdir(checkpoint_dir):
-        if checkpoint_file.endswith('.ckpt'):
-            checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
-            model_config = get_backbone_from_checkpoint(checkpoint_path)
+def predict_urls(urls, models, device, batch_size=32, use_tta=False):
+    dataset = UrlImageDataset(urls)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=4)
+    
+    all_predictions = []
+    all_confidences = []
+    
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Processing images"):
+            batch = batch.to(device)
+            predictions = ensemble_predict(models, batch, device, use_tta)
+            probabilities, predicted = torch.max(predictions, dim=1)
             
-            model = ImageClassifier.load_from_checkpoint(
-                checkpoint_path,
-                backbone=model_config['backbone'],
-                num_classes=model_config['num_classes'],
-                learning_rate=model_config['learning_rate']
-            )
-            models.append(model)
-            print(f"Loaded model from {checkpoint_file} with backbone {model_config['backbone']}")
+            all_predictions.extend(predicted.cpu().numpy())
+            all_confidences.extend(probabilities.cpu().numpy())
+    
+    return all_predictions, all_confidences
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    for model in models:
-        model.to(device)
-
+def validate_models(models, datamodule, device, use_tta=False):
     correct = 0
     total = 0
     val_loader = datamodule.val_dataloader()
 
-    print(f"\nStarting validation{' with TTA' if args.use_tta else ''}...")
     with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(val_loader):
+        for images, targets in tqdm(val_loader, desc="Validating"):
             images, targets = images.to(device), targets.to(device)
             
-            ensemble_preds = ensemble_predict(models, images, device, use_tta=args.use_tta)
+            ensemble_preds = ensemble_predict(models, images, device, use_tta)
             _, predicted = torch.max(ensemble_preds, 1)
             
             total += targets.size(0)
             correct += (predicted == targets).sum().item()
-            
-            if batch_idx % 10 == 0:
-                print(f"Processed {batch_idx}/{len(val_loader)} batches")
 
     accuracy = 100 * correct / total
-    print(f"\nEnsemble Validation Accuracy{' with TTA' if args.use_tta else ''}: {accuracy:.2f}%")
+    return accuracy
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--use_tta', action='store_true', help='Использовать Test Time Augmentation')
+    parser.add_argument('--input_file', type=str, help='Путь к файлу со списком URL')
+    parser.add_argument('--output_file', type=str, help='Путь к выходному CSV файлу')
+    parser.add_argument('--debug', action='store_true', help='Добавить столбец confidence в выходной файл')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+                      help='Device to use (cuda/cpu)')
+    args = parser.parse_args()
+
+    device = setup_device(args)
+    
+    if args.input_file:
+        # Режим разметки
+        if args.input_file.endswith('.xlsx'):
+            df = pd.read_excel(args.input_file)
+            urls = df['downloadUrl'].dropna().tolist()
+        else:
+            df = pd.read_csv(args.input_file)
+            urls = df['downloadUrl'].dropna().tolist()
+        
+        models = load_models('ensemble', device)
+        
+        print(f"\nStarting prediction{' with TTA' if args.use_tta else ''}...")
+        predictions, confidences = predict_urls(urls, models, device, use_tta=args.use_tta)
+        
+        df = pd.DataFrame({
+            'downloadUrl': urls,
+            'is_conifer': [bool(pred) for pred in predictions]
+        })
+        
+        if args.debug:
+            df['confidence'] = confidences
+        
+        output_file = args.output_file or 'predictions.csv'
+        df.to_csv(output_file, index=False)
+        print(f"Predictions saved to {output_file}")
+        
+    else:
+        # Режим валидации
+        data_config = load_config('configs/datamodule/default.yaml')
+        datamodule = TreeDataModule(
+            data_dir=data_config['data_dir'],
+            batch_size=data_config['batch_size'],
+            num_workers=data_config['num_workers']
+        )
+        datamodule.setup()
+        
+        models = load_models('ensemble', device)
+        
+        print(f"\nStarting validation{' with TTA' if args.use_tta else ''}...")
+        accuracy = validate_models(models, datamodule, device, use_tta=args.use_tta)
+        print(f"\nEnsemble Validation Accuracy{' with TTA' if args.use_tta else ''}: {accuracy:.2f}%")
 
 if __name__ == '__main__':
     main() 
