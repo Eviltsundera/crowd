@@ -39,13 +39,11 @@ class ImageClassifier(pl.LightningModule):
         
         self.tta_transforms = [
             transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(10),
+                transforms.RandomHorizontalFlip(p=1),
                 transforms.ToTensor(),
             ]),
             transforms.Compose([
-                transforms.RandomVerticalFlip(),
-                transforms.RandomRotation(15),
+                transforms.RandomVerticalFlip(p=1),
                 transforms.ToTensor(),
             ]),
             transforms.Compose([
